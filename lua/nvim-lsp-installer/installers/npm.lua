@@ -30,25 +30,30 @@ local function create_installer(read_version_from_context)
         return ensure_npm(
             ---@type ServerInstallerFunction
             function(_, callback, context)
-                local pkgs = Data.list_copy(packages or {})
                 local c = process.chain {
                     cwd = context.install_dir,
                     stdio_sink = context.stdio_sink,
                 }
-            -- stylua: ignore start
-            if not (fs.dir_exists(path.concat { context.install_dir, "node_modules" }) or
-                   fs.file_exists(path.concat { context.install_dir, "package.json" }))
-            then
-                c.run(npm, { "init", "--yes", "--scope=lsp-installer" })
-            end
+                -- stylua: ignore start
+                if not (fs.dir_exists(path.concat { context.install_dir, "node_modules" }) or
+                       fs.file_exists(path.concat { context.install_dir, "package.json" }))
+                then
+                    c.run(npm, { "init", "--yes", "--scope=lsp-installer" })
+                end
 
-            if read_version_from_context and context.requested_server_version and #pkgs > 0 then
-                -- The "head" package is the recipient for the requested version. It's.. by design... don't ask.
-                pkgs[1] = ("%s@%s"):format(pkgs[1], context.requested_server_version)
-            end
+                local head_package = packages[1]
+                local tail_packages = { unpack(packages, 2) }
+
+                if read_version_from_context and context.requested_server_version then
+                    -- The "head" package is the recipient for the requested version. It's.. by design... don't ask.
+                    head_package = ("%s@%s"):format(head_package, context.requested_server_version)
+                end
 
                 -- stylua: ignore end
-                c.run(npm, vim.list_extend({ "install" }, pkgs))
+                c.run(npm, { "install", head_package })
+                if #tail_packages > 0 then
+                    c.run(npm, vim.list_extend({ "install", "--no-save" }, tail_packages))
+                end
                 c.spawn(callback)
             end
         )

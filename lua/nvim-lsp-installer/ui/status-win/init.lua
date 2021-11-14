@@ -5,6 +5,8 @@ local Data = require "nvim-lsp-installer.data"
 local display = require "nvim-lsp-installer.ui.display"
 local settings = require "nvim-lsp-installer.settings"
 local lsp_servers = require "nvim-lsp-installer.servers"
+local JobExecutionPool = require "nvim-lsp-installer.job.pool"
+local jobs = require "nvim-lsp-installer.job.outdated-servers"
 
 local HELP_KEYMAP = "?"
 local CLOSE_WINDOW_KEYMAP_1 = "<Esc>"
@@ -168,6 +170,23 @@ local function get_relative_install_time(time)
     end
 end
 
+---@param outdated_packages OutdatedPackage[]
+---@return string
+local function format_new_package_versions(outdated_packages)
+    local result = {}
+    for _, outdated_package in ipairs(outdated_packages) do
+        table.insert(
+            result,
+            ("%s@%s → %s"):format(
+                outdated_package.name,
+                outdated_package.current_version,
+                outdated_package.latest_version
+            )
+        )
+    end
+    return table.concat(result, ", ")
+end
+
 ---@param server ServerState
 local function ServerMetadata(server)
     return Ui.Node(Data.list_not_nil(
@@ -189,6 +208,12 @@ local function ServerMetadata(server)
             ))
         end),
         Ui.Table(Data.list_not_nil(
+            Data.lazy(#server.metadata.outdated_packages > 0, function()
+                return {
+                    { "new version", "LspInstallerMuted" },
+                    { format_new_package_versions(server.metadata.outdated_packages), "LspInstallerGreen" },
+                }
+            end),
             Data.lazy(server.metadata.install_timestamp_seconds, function()
                 return {
                     { "last updated", "LspInstallerMuted" },
@@ -217,26 +242,34 @@ end
 ---@param servers ServerState[]
 ---@param props ServerGroupProps
 local function InstalledServers(servers, props)
-    return Ui.Node(Data.list_map(function(server)
-        local is_expanded = props.expanded_server == server.name
-        return Ui.Node {
-            Ui.HlTextNode {
-                Data.list_not_nil(
-                    { settings.current.ui.icons.server_installed, "LspInstallerGreen" },
-                    { " " .. server.name, "" },
-                    Data.when(server.deprecated, { " deprecated", "LspInstallerOrange" })
-                ),
-            },
-            Ui.Keybind(settings.current.ui.keymaps.toggle_server_expand, "EXPAND_SERVER", { server.name }),
-            Ui.Keybind(settings.current.ui.keymaps.update_server, "INSTALL_SERVER", { server.name }),
-            Ui.Keybind(settings.current.ui.keymaps.uninstall_server, "UNINSTALL_SERVER", { server.name }),
-            Ui.When(is_expanded, function()
-                return Indent {
-                    ServerMetadata(server),
-                }
-            end),
-        }
-    end, servers))
+    return Ui.Node(Data.list_map(
+        ---@param server ServerState
+        function(server)
+            local is_expanded = props.expanded_server == server.name
+            return Ui.Node {
+                Ui.HlTextNode {
+                    Data.list_not_nil(
+                        { settings.current.ui.icons.server_installed, "LspInstallerGreen" },
+                        { " " .. server.name, "" },
+                        Data.when(server.deprecated, { " deprecated", "LspInstallerOrange" }),
+                        Data.when(
+                            #server.metadata.outdated_packages > 0,
+                            { " new version available", "LspInstallerGreen" }
+                        )
+                    ),
+                },
+                Ui.Keybind(settings.current.ui.keymaps.toggle_server_expand, "EXPAND_SERVER", { server.name }),
+                Ui.Keybind(settings.current.ui.keymaps.update_server, "INSTALL_SERVER", { server.name }),
+                Ui.Keybind(settings.current.ui.keymaps.uninstall_server, "UNINSTALL_SERVER", { server.name }),
+                Ui.When(is_expanded, function()
+                    return Indent {
+                        ServerMetadata(server),
+                    }
+                end),
+            }
+        end,
+        servers
+    ))
 end
 
 ---@param server ServerState
@@ -438,6 +471,8 @@ local function create_initial_server_state(server)
             install_timestamp_seconds = nil, -- lazy
             install_dir = vim.fn.fnamemodify(server.root_dir, ":~"),
             filetypes = table.concat(server:get_supported_filetypes(), ", "),
+            ---@type OutdatedPackage[]
+            outdated_packages = {},
         },
         installer = {
             is_queued = false,
@@ -583,33 +618,9 @@ local function init(all_servers)
     end
 
     -- We have a queue because installers have a tendency to hog resources.
-    local queue
-    do
-        local max_running = settings.current.max_concurrent_installers
-        ---@type ServerInstallTuple[]
-        local q = {}
-        local r = 0
-
-        local check_queue
-        check_queue = vim.schedule_wrap(function()
-            if #q > 0 and r < max_running then
-                local dequeued_server = table.remove(q, 1)
-                r = r + 1
-                start_install(dequeued_server, function()
-                    r = r - 1
-                    check_queue()
-                end)
-            end
-        end)
-
-        ---@param server Server
-        ---@param version string|nil
-        queue = function(server, version)
-            q[#q + 1] = { server, version }
-            check_queue()
-        end
-    end
-
+    local queue = JobExecutionPool:new {
+        size = settings.current.max_concurrent_installers,
+    }
     ---@param server Server
     ---@param version string|nil
     local function install_server(server, version)
@@ -624,7 +635,9 @@ local function init(all_servers)
             state.servers[server.name] = create_initial_server_state(server)
             state.servers[server.name].installer.is_queued = true
         end)
-        queue(server, version)
+        queue:supply(function(cb)
+            start_install({ server, version }, cb)
+        end)
     end
 
     ---@param server Server
@@ -755,6 +768,14 @@ local function init(all_servers)
         mutate_state(function(state)
             state.is_showing_help = false
             state.prioritized_servers = Data.set_of(prioritized_servers)
+        end)
+
+        vim.schedule(function()
+            jobs.identify_outdated_servers(lsp_servers.get_installed_servers(), function(check_result)
+                mutate_state(function(state)
+                    state.servers[check_result.server.name].metadata.outdated_packages = check_result.outdated_packages
+                end)
+            end)
         end)
 
         window.open {
