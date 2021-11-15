@@ -28,6 +28,10 @@ function CheckResult.new(server, success, outdated_packages)
     return self
 end
 
+function CheckResult:has_outdated_packages()
+    return #self.outdated_packages > 0
+end
+
 ---@param server Server
 ---@param on_check_complete fun(result: CheckResult)
 local function check_npm_installation(server, on_check_complete)
@@ -144,21 +148,19 @@ jobpool = jobpool or JobExecutionPool:new {
 
 ---@param check_fn fun(server: Server, on_check_complete: fun(result: CheckResult))
 ---@param server Server
----@param on_outdated_server fun(result: CheckResult)
-local function wrap(check_fn, server, on_outdated_server)
+---@param on_result fun(result: CheckResult)
+local function wrap(check_fn, server, on_result)
     return function(done)
         check_fn(server, function(result)
             done()
-            if result.success and #result.outdated_packages > 0 then
-                on_outdated_server(result)
-            end
+            on_result(result)
         end)
     end
 end
 
 ---@param servers Server[]
----@param on_outdated_server fun(result: CheckResult)
-function M.identify_outdated_servers(servers, on_outdated_server)
+---@param on_result fun(result: CheckResult)
+function M.identify_outdated_servers(servers, on_result)
     for _, server in ipairs(servers) do
         -- giggity
         local is_git_repo = fs.dir_exists(path.concat {
@@ -175,11 +177,13 @@ function M.identify_outdated_servers(servers, on_outdated_server)
         })
 
         if is_git_repo then
-            jobpool:supply(wrap(check_git_installation, server, on_outdated_server))
+            jobpool:supply(wrap(check_git_installation, server, on_result))
         elseif is_npm_installation then
-            jobpool:supply(wrap(check_npm_installation, server, on_outdated_server))
+            jobpool:supply(wrap(check_npm_installation, server, on_result))
         elseif is_pip_installation then
-            jobpool:supply(wrap(check_pip_installation, server, on_outdated_server))
+            jobpool:supply(wrap(check_pip_installation, server, on_result))
+        else
+            on_result(CheckResult.new(server, false))
         end
     end
 end

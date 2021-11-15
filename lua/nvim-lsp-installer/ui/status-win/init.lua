@@ -252,6 +252,10 @@ local function InstalledServers(servers, props)
                         { settings.current.ui.icons.server_installed, "LspInstallerGreen" },
                         { " " .. server.name, "" },
                         Data.when(server.deprecated, { " deprecated", "LspInstallerOrange" }),
+                        Data.when(server.is_checking_outdated_packages, {
+                            " (checking for updates)",
+                            "LspInstallerMuted",
+                        }),
                         Data.when(
                             #server.metadata.outdated_packages > 0,
                             { " new version available", "LspInstallerGreen" }
@@ -465,6 +469,7 @@ local function create_initial_server_state(server)
     local server_state = {
         name = server.name,
         is_installed = server:is_installed(),
+        is_checking_outdated_packages = false,
         deprecated = server.deprecated,
         metadata = {
             homepage = server.homepage,
@@ -572,12 +577,10 @@ local function init(all_servers)
         end)
     end
 
-    ---@alias ServerInstallTuple {[1]:Server, [2]: string|nil}
-
-    ---@param server_tuple ServerInstallTuple
+    ---@param server Server
+    ---@param requested_version string|nil
     ---@param on_complete fun()
-    local function start_install(server_tuple, on_complete)
-        local server, requested_version = server_tuple[1], server_tuple[2]
+    local function start_install(server, requested_version, on_complete)
         mutate_state(function(state)
             state.servers[server.name].installer.is_queued = false
             state.servers[server.name].installer.is_running = true
@@ -611,8 +614,10 @@ local function init(all_servers)
                 state.servers[server.name].is_installed = success
                 state.servers[server.name].installer.is_running = false
                 state.servers[server.name].installer.has_run = true
+                if not state.expanded_server then
+                    expand_server(server.name)
+                end
             end)
-            expand_server(server.name)
             on_complete()
         end)
     end
@@ -636,7 +641,7 @@ local function init(all_servers)
             state.servers[server.name].installer.is_queued = true
         end)
         queue:supply(function(cb)
-            start_install({ server, version }, cb)
+            start_install(server, version, cb)
         end)
     end
 
@@ -771,9 +776,19 @@ local function init(all_servers)
         end)
 
         vim.schedule(function()
-            jobs.identify_outdated_servers(lsp_servers.get_installed_servers(), function(check_result)
+            local installed_servers = lsp_servers.get_installed_servers()
+            mutate_state(function(state)
+                for _, server in pairs(installed_servers) do
+                    state.servers[server.name].is_checking_outdated_packages = true
+                end
+            end)
+            jobs.identify_outdated_servers(installed_servers, function(check_result)
                 mutate_state(function(state)
-                    state.servers[check_result.server.name].metadata.outdated_packages = check_result.outdated_packages
+                    state.servers[check_result.server.name].is_checking_outdated_packages = false
+                    if check_result.success and check_result:has_outdated_packages() then
+                        state.servers[check_result.server.name].metadata.outdated_packages =
+                            check_result.outdated_packages
+                    end
                 end)
             end)
         end)
