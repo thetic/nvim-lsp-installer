@@ -36,30 +36,34 @@ end
 ---@param on_check_complete fun(result: CheckResult)
 local function check_npm_installation(server, on_check_complete)
     local stdio = process.in_memory_sink()
-    process.spawn("npm", {
-        args = { "outdated", "--json" },
-        cwd = server.root_dir,
-        stdio_sink = stdio.sink,
-    }, function()
-        ---@alias NpmOutdatedPackage {current: string, wanted: string, latest: string, dependent: string, location: string}
-        ---@type table<string, NpmOutdatedPackage>
-        local data = json_decode(table.concat(stdio.buffers.stdout, ""))
+    process.spawn(
+        "npm",
+        {
+            args = { "outdated", "--json" },
+            cwd = server.root_dir,
+            stdio_sink = stdio.sink,
+        },
+        vim.schedule_wrap(function()
+            ---@alias NpmOutdatedPackage {current: string, wanted: string, latest: string, dependent: string, location: string}
+            ---@type table<string, NpmOutdatedPackage>
+            local data = json_decode(table.concat(stdio.buffers.stdout, ""))
 
-        ---@type OutdatedPackage[]
-        local outdated_packages = {}
+            ---@type OutdatedPackage[]
+            local outdated_packages = {}
 
-        for package, outdated_package in pairs(data) do
-            if outdated_package.current ~= outdated_package.latest then
-                table.insert(outdated_packages, {
-                    name = package,
-                    current_version = outdated_package.current,
-                    latest_version = outdated_package.latest,
-                })
+            for package, outdated_package in pairs(data) do
+                if outdated_package.current ~= outdated_package.latest then
+                    table.insert(outdated_packages, {
+                        name = package,
+                        current_version = outdated_package.current,
+                        latest_version = outdated_package.latest,
+                    })
+                end
             end
-        end
 
-        on_check_complete(CheckResult.new(server, true, outdated_packages))
-    end)
+            on_check_complete(CheckResult.new(server, true, outdated_packages))
+        end)
+    )
 end
 
 ---@param package PipOutdatedPackage
@@ -71,36 +75,40 @@ end
 ---@param on_check_complete fun(result: CheckResult)
 local function check_pip_installation(server, on_check_complete)
     local stdio = process.in_memory_sink()
-    process.spawn(pip3.executable(server.root_dir, "pip"), {
-        args = { "list", "--outdated", "--local", "--format=json", "--not-required" },
-        cwd = server.root_dir,
-        stdio_sink = stdio.sink,
-    }, function(success)
-        if success then
-            ---@alias PipOutdatedPackage {name: string, version: string, latest_version: string, latest_filetype: string}
-            ---@type PipOutdatedPackage[]
-            local data = json_decode(table.concat(stdio.buffers.stdout, ""))
-            ---@type PipOutdatedPackage[]
-            local filtered_packages = vim.tbl_filter(isnt_ignored_pip_package, data)
+    process.spawn(
+        pip3.executable(server.root_dir, "pip"),
+        {
+            args = { "list", "--outdated", "--local", "--format=json", "--not-required" },
+            cwd = server.root_dir,
+            stdio_sink = stdio.sink,
+        },
+        vim.schedule_wrap(function(success)
+            if success then
+                ---@alias PipOutdatedPackage {name: string, version: string, latest_version: string, latest_filetype: string}
+                ---@type PipOutdatedPackage[]
+                local data = json_decode(table.concat(stdio.buffers.stdout, ""))
+                ---@type PipOutdatedPackage[]
+                local filtered_packages = vim.tbl_filter(isnt_ignored_pip_package, data)
 
-            ---@type OutdatedPackage[]
-            local outdated_packages = {}
+                ---@type OutdatedPackage[]
+                local outdated_packages = {}
 
-            for _, outdated_package in ipairs(filtered_packages) do
-                if outdated_package.version ~= outdated_package.latest_version then
-                    table.insert(outdated_packages, {
-                        name = outdated_package.name,
-                        current_version = outdated_package.version,
-                        latest_version = outdated_package.latest_version,
-                    })
+                for _, outdated_package in ipairs(filtered_packages) do
+                    if outdated_package.version ~= outdated_package.latest_version then
+                        table.insert(outdated_packages, {
+                            name = outdated_package.name,
+                            current_version = outdated_package.version,
+                            latest_version = outdated_package.latest_version,
+                        })
+                    end
                 end
-            end
 
-            on_check_complete(CheckResult.new(server, true, outdated_packages))
-        else
-            on_check_complete(CheckResult.new(server, false))
-        end
-    end)
+                on_check_complete(CheckResult.new(server, true, outdated_packages))
+            else
+                on_check_complete(CheckResult.new(server, false))
+            end
+        end)
+    )
 end
 
 ---@param server Server
