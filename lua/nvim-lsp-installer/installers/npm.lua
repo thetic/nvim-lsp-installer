@@ -24,17 +24,16 @@ local function ensure_npm(installer)
     }
 end
 
-local function create_installer(read_version_from_context)
-    ---@param packages string[]
-    return function(packages)
-        return ensure_npm(
-            ---@type ServerInstallerFunction
-            function(_, callback, context)
-                local pkgs = Data.list_copy(packages or {})
-                local c = process.chain {
-                    cwd = context.install_dir,
-                    stdio_sink = context.stdio_sink,
-                }
+---@param packages string[]
+local function create_installer(packages)
+    return ensure_npm(
+        ---@type ServerInstallerFunction
+        function(_, callback, context)
+            local pkgs = Data.list_copy(packages or {})
+            local c = process.chain {
+                cwd = context.install_dir,
+                stdio_sink = context.stdio_sink,
+            }
             -- stylua: ignore start
             if not (fs.dir_exists(path.concat { context.install_dir, "node_modules" }) or
                    fs.file_exists(path.concat { context.install_dir, "package.json" }))
@@ -42,24 +41,30 @@ local function create_installer(read_version_from_context)
                 c.run(npm, { "init", "--yes", "--scope=lsp-installer" })
             end
 
-            if read_version_from_context and context.requested_server_version and #pkgs > 0 then
+            if context.requested_server_version and #pkgs > 0 then
                 -- The "head" package is the recipient for the requested version. It's.. by design... don't ask.
                 pkgs[1] = ("%s@%s"):format(pkgs[1], context.requested_server_version)
             end
 
-                -- stylua: ignore end
-                c.run(npm, vim.list_extend({ "install" }, pkgs))
-                c.spawn(callback)
-            end
-        )
-    end
+            -- stylua: ignore end
+            c.run(npm, vim.list_extend({ "install" }, pkgs))
+            c.spawn(callback)
+        end
+    )
 end
 
 ---Creates an installer that installs the provided packages. Will respect user's requested version.
-M.packages = create_installer(true)
+---@param packages string[]
+function M.packages(packages)
+    return create_installer(packages)
+end
+
 ---Creates an installer that installs the provided packages. Will NOT respect user's requested version.
 ---This is useful in situation where there's a need to install an auxiliary npm package.
-M.install = create_installer(false)
+---@param packages string[]
+function M.install(packages)
+    return installers.unset_requested_version(create_installer(packages))
+end
 
 ---Creates a server installer that executes the given executable.
 ---@param executable string

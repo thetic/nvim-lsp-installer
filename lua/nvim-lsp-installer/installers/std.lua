@@ -226,7 +226,8 @@ end
 
 ---Shallow git clone.
 ---@param repo_url string
-function M.git_clone(repo_url)
+---@param directory string|nil @The directory to clone into (defaults to ".")
+function M.git_clone(repo_url, directory)
     ---@type ServerInstallerFunction
     return function(_, callback, context)
         local c = process.chain {
@@ -234,7 +235,7 @@ function M.git_clone(repo_url)
             stdio_sink = context.stdio_sink,
         }
 
-        c.run("git", { "clone", "--depth", "1", repo_url, "." })
+        c.run("git", { "clone", "--depth", "1", repo_url, directory or "." })
 
         if context.requested_server_version then
             c.run("git", { "fetch", "--depth", "1", "origin", context.requested_server_version })
