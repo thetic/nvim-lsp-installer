@@ -32,22 +32,11 @@ return function(name, root_dir)
                 end
             end),
             context.capture(function(ctx)
-                -- Preferably we'd not have to write a script file that captures the installed version.
-                -- But in order to not break backwards compatibility for existing installations of ltex, we do it.
-                return std.executable_alias(
-                    script_name,
-                    path.concat {
-                        root_dir,
-                        ("ltex-ls-%s"):format(ctx.requested_server_version),
-                        "bin",
-                        platform.is_win and "ltex-ls.bat" or "ltex-ls",
-                    }
-                )
+                return std.rename(("ltex-ls-%s"):format(ctx.requested_server_version), "ltex-ls")
             end),
-            std.chmod("+x", { "ltex-ls" }),
         },
         default_options = {
-            cmd = { path.concat { root_dir, script_name } },
+            cmd = { path.concat { root_dir, "ltex-ls", "bin", script_name } },
         },
     }
 end
