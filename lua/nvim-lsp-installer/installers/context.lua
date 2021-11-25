@@ -96,7 +96,12 @@ function M.use_github_release_file(repo, file)
         M.use_github_release(repo),
         function(server, callback, context)
             local function get_download_url(version)
-                local target_file = type(file) == "function" and file(version) or file
+                local target_file
+                if type(file) == "function" then
+                    target_file = file(version)
+                else
+                    target_file = file
+                end
                 if not target_file then
                     log.fmt_error(
                         "Unable to find which release file to download. server_name=%s, repo=%s",

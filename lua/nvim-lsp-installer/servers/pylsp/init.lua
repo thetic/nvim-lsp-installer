@@ -9,7 +9,7 @@ return function(name, root_dir)
         homepage = "https://github.com/python-lsp/python-lsp-server",
         installer = pip3.packages { "python-lsp-server[all]" },
         default_options = {
-            cmd = { pip3.executable(root_dir, "pylsp") },
+            cmd_env = pip3.env(root_dir),
         },
     }
 end

@@ -11,10 +11,9 @@ return function(name, root_dir)
         homepage = "https://github.com/ansible/ansible-language-server",
         installer = {
             std.git_clone "https://github.com/ansible/ansible-language-server",
-            npm.install { "npm@latest" }, -- ansiblels has quite a strict npm version requirement
-            npm.exec("npm", { "install" }),
+            npm.install(),
             npm.run "compile",
-            npm.exec("npm", { "install", "--production" }),
+            npm.install(true),
         },
         default_options = {
             filetypes = { "yaml", "yaml.ansible" },

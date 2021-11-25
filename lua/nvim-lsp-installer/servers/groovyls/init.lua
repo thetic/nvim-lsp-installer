@@ -10,7 +10,7 @@ return function(name, root_dir)
         languages = { "groovy" },
         homepage = "https://github.com/GroovyLanguageServer/groovy-language-server",
         installer = {
-            std.ensure_executables { { "javac", "javac was not found in path." } },
+            std.ensure_executables { "javac" },
             std.git_clone "https://github.com/GroovyLanguageServer/groovy-language-server",
             context.promote_install_dir(),
             std.gradlew {

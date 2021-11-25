@@ -51,6 +51,7 @@ function M.env(root_dir)
     return {
         GEM_HOME = root_dir,
         GEM_PATH = root_dir,
+        PATH = process.extend_path { path.concat { root_dir, "bin" } },
     }
 end
 

@@ -42,4 +42,10 @@ function M.executable(root_dir, executable)
     return path.concat { root_dir, executable }
 end
 
+function M.env(root_dir)
+    return {
+        PATH = process.extend_path { root_dir },
+    }
+end
+
 return M

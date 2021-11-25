@@ -24,42 +24,55 @@ local function ensure_npm(installer)
     }
 end
 
-local function create_installer(read_version_from_context)
-    ---@param packages string[]
-    return function(packages)
-        return ensure_npm(
-            ---@type ServerInstallerFunction
-            function(_, callback, context)
-                local pkgs = Data.list_copy(packages or {})
-                local c = process.chain {
-                    cwd = context.install_dir,
-                    stdio_sink = context.stdio_sink,
-                }
-            -- stylua: ignore start
-            if not (fs.dir_exists(path.concat { context.install_dir, "node_modules" }) or
-                   fs.file_exists(path.concat { context.install_dir, "package.json" }))
-            then
-                c.run(npm, { "init", "--yes", "--scope=lsp-installer" })
-            end
+---@param packages string[]
+local function create_installer(packages)
+    return ensure_npm(
+        ---@type ServerInstallerFunction
+        function(_, callback, context)
+            local pkgs = Data.list_copy(packages or {})
+            local c = process.chain {
+                cwd = context.install_dir,
+                stdio_sink = context.stdio_sink,
+            }
+                -- stylua: ignore start
+                if not (fs.dir_exists(path.concat { context.install_dir, "node_modules" }) or
+                       fs.file_exists(path.concat { context.install_dir, "package.json" }))
+                then
+                    -- 1. Create a package.json to set upper boundary for node module resolution
+                    c.run(npm, { "init", "--yes", "--scope=lsp-installer" })
+                end
 
-            if read_version_from_context and context.requested_server_version and #pkgs > 0 then
-                -- The "head" package is the recipient for the requested version. It's.. by design... don't ask.
-                pkgs[1] = ("%s@%s"):format(pkgs[1], context.requested_server_version)
-            end
+                if context.requested_server_version and #pkgs > 0 then
+                    -- The "head" package is the recipient for the requested version. It's.. by design... don't ask.
+                    pkgs[1] = ("%s@%s"):format(pkgs[1], context.requested_server_version)
+                end
 
-                -- stylua: ignore end
-                c.run(npm, vim.list_extend({ "install" }, pkgs))
-                c.spawn(callback)
-            end
-        )
-    end
+            -- stylua: ignore end
+            -- 2. Use global-style. The reasons for this are:
+            --   a) To avoid polluting the executables (aka bin-links) that npm creates.
+            --   b) The installation itself is after all more similar to a "global" installation, so we don't have the
+            --      same benefits of not using global style (e.g., deduping the dependency tree).
+            c.run(npm, { "config", "set", "--location=project", "global-style=true" })
+
+            --- 3. Install the packages.
+            c.run(npm, vim.list_extend({ "install" }, pkgs))
+            c.spawn(callback)
+        end
+    )
 end
 
 ---Creates an installer that installs the provided packages. Will respect user's requested version.
-M.packages = create_installer(true)
+---@param packages string[]
+function M.packages(packages)
+    return create_installer(packages)
+end
+
 ---Creates an installer that installs the provided packages. Will NOT respect user's requested version.
 ---This is useful in situation where there's a need to install an auxiliary npm package.
-M.install = create_installer(false)
+---@param packages string[]
+function M.install(packages)
+    return installers.unset_requested_version(create_installer(packages))
+end
 
 ---Creates a server installer that executes the given executable.
 ---@param executable string
@@ -98,6 +111,12 @@ function M.executable(root_dir, executable)
         "node_modules",
         ".bin",
         platform.is_win and ("%s.cmd"):format(executable) or executable,
+    }
+end
+
+function M.env(root_dir)
+    return {
+        PATH = process.extend_path { path.concat { root_dir, "node_modules", ".bin" } },
     }
 end
 

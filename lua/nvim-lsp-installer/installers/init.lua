@@ -52,6 +52,22 @@ function M.compose(installers)
     return M.pipe(Data.list_reverse(installers))
 end
 
+--- Unsets the requested server version in the context before running the provided installer.
+--- After the provided installer completed, the requested server version is restored.
+---@param installer ServerInstallerFunction
+function M.unset_requested_version(installer)
+    ---@type ServerInstallerFunction
+    return function(server, callback, context)
+        local requested_server_version = context.requested_server_version
+        context.requested_server_version = nil
+        installer(server, function(...)
+            -- Restore version in context for any subsequent installers
+            context.requested_server_version = requested_server_version
+            callback(...)
+        end, context)
+    end
+end
+
 ---@param installers ServerInstallerFunction[]
 ---@return ServerInstallerFunction @An installer function that will serially execute the provided installers, until the first one succeeds.
 function M.first_successful(installers)

@@ -9,7 +9,8 @@ return function(name, root_dir)
         languages = { "graphql" },
         installer = npm.packages { "graphql-language-service-cli", "graphql" },
         default_options = {
-            cmd = { npm.executable(root_dir, "graphql-lsp"), "server", "-m", "stream" },
+            cmd_env = npm.env(root_dir),
+            -- TODO contrib upstream to lspconfig
             filetypes = { "typescriptreact", "javascriptreact", "graphql" },
         },
     }
