@@ -163,6 +163,9 @@ return {
   sorbet = {
     filetypes = { "ruby" }
   },
+  spectral = {
+    filetypes = { "yaml", "json", "yml" }
+  },
   sqlls = {
     filetypes = { "sql", "mysql" }
   },
